@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MiniCalc – Mini compilador</title>
+<style>
+  :root{
+    --bg:#f6f7fb; --card:#fff; --ink:#1c2233; --muted:#667085; --line:#e3e6ef;
+    --accent:#3b5bdb; --accent-soft:#e7ecff; --ok:#12805c; --ok-soft:#e3f6ee; --err:#c92a2a; --err-soft:#fdeaea;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#12151f; --card:#1b2030; --ink:#e8ebf5; --muted:#9aa3b8; --line:#2b3248;
+      --accent:#7c93ff; --accent-soft:#252d52; --ok:#4cd6a0; --ok-soft:#14352b; --err:#ff8787; --err-soft:#3b1d1d; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{padding:22px 24px 8px;max-width:1100px;margin:0 auto}
+  h1{margin:0;font-size:24px;letter-spacing:-.01em}
+  h1 span{color:var(--accent)}
+  header p{margin:4px 0 0;color:var(--muted)}
+  main{max-width:1100px;margin:0 auto;padding:12px 24px 40px;display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:16px}
+  @media(max-width:860px){main{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .card h2{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  textarea{width:100%;height:290px;resize:vertical;border:1px solid var(--line);border-radius:8px;padding:10px;
+    font:14px/1.5 var(--mono);background:var(--bg);color:var(--ink);tab-size:2}
+  textarea:focus{outline:2px solid var(--accent);outline-offset:0}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  button{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:8px 14px;border-radius:8px;font:inherit;cursor:pointer}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  button:hover{filter:brightness(.96)}
+  .status{margin-top:10px;padding:8px 10px;border-radius:8px;font-size:14px}
+  .status.ok{background:var(--ok-soft);color:var(--ok)}
+  .status.err{background:var(--err-soft);color:var(--err)}
+  .status ul{margin:4px 0 0;padding-left:18px}
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px;border-bottom:1px solid var(--line);padding-bottom:8px}
+  .tab{border:0;background:transparent;color:var(--muted);padding:6px 10px;border-radius:6px;font-weight:600}
+  .tab.active{background:var(--accent-soft);color:var(--accent)}
+  .pane{display:none}.pane.active{display:block}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+  td.m,pre,code{font-family:var(--mono)}
+  .tbl-wrap{max-height:400px;overflow:auto}
+  pre{margin:0;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;max-height:400px;font-size:13.5px;line-height:1.6}
+  .tag{display:inline-block;padding:1px 8px;border-radius:99px;background:var(--accent-soft);color:var(--accent);font:600 12px var(--mono)}
+  .tree,.tree ul{list-style:none;margin:0;padding-left:20px;border-left:1px dashed var(--line)}
+  .tree{border:0;padding-left:0;font-family:var(--mono);font-size:13.5px}
+  .tree li{margin:3px 0}
+  .tree .n{background:var(--accent-soft);color:var(--accent);padding:1px 7px;border-radius:5px;font-weight:600}
+  .tree .l{background:var(--bg);border:1px solid var(--line);padding:1px 7px;border-radius:5px}
+  .out{font-family:var(--mono);font-size:14px}
+  .out div{padding:4px 8px;border-bottom:1px solid var(--line)}
+  .hint{color:var(--muted);font-size:13px;margin:0 0 8px}
+  .grammar{white-space:pre-wrap}
+</style>
+</head>
+<body>
+<header>
+  <h1>Mini<span>Calc</span> — mini compilador</h1>
+  <p>Escribe un programa, pulsa <b>Compilar</b> y revisa cada fase: léxico → sintaxis (AST) → semántica → código intermedio → ejecución.</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Código fuente</h2>
+    <textarea id="src" spellcheck="false">// Calcula el total de una compra con IGV
+precio = 120;
+cantidad = 3;
+subtotal = precio * cantidad;
+igv = subtotal * 0.18;
+total = subtotal + igv;
+
+mostrar subtotal;
+mostrar igv;
+mostrar total;
+mostrar (total - 50) / 2;</textarea>
+    <div class="row">
+      <button class="primary" id="btnRun">Compilar y ejecutar</button>
+      <button id="btnEx1">Ejemplo con errores</button>
+      <button id="btnEx2">Ejemplo básico</button>
+      <button id="btnClear">Limpiar</button>
+    </div>
+    <div id="status"></div>
+    <h2 style="margin-top:16px">Gramática (BNF)</h2>
+    <pre class="grammar">programa  → sentencia*
+sentencia → ID "=" expr ";"
+          | "mostrar" expr ";"
+expr      → term (("+" | "-") term)*
+term      → factor (("*" | "/") factor)*
+factor    → NUM | ID | "(" expr ")" | "-" factor</pre>
+  </section>
+
+  <section class="card">
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-p="p1">1. Léxico</button>
+      <button class="tab" data-p="p2">2. Sintaxis (AST)</button>
+      <button class="tab" data-p="p3">3. Semántica</button>
+      <button class="tab" data-p="p4">4. Código intermedio</button>
+      <button class="tab" data-p="p5">5. Ejecución</button>
+    </div>
+
+    <div class="pane active" id="p1">
+      <p class="hint">El analizador léxico convierte el texto en tokens (lexema, tipo, línea y columna).</p>
+      <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Lexema</th><th>Token</th><th>Lín</th><th>Col</th></tr></thead><tbody id="tokBody"></tbody></table></div>
+    </div>
+    <div class="pane" id="p2">
+      <p class="hint">Parser descendente recursivo: construye el árbol de sintaxis abstracta (AST).</p>
+      <ul class="tree" id="astRoot"></ul>
+    </div>
+    <div class="pane" id="p3">
+      <p class="hint">Análisis semántico: tabla de símbolos y verificación de variables definidas antes de usarse.</p>
+      <div class="tbl-wrap"><table><thead><tr><th>Variable</th><th>Definida en línea</th><th>Usos</th></tr></thead><tbody id="symBody"></tbody></table></div>
+      <div id="semMsgs" style="margin-top:10px"></div>
+    </div>
+    <div class="pane" id="p4">
+      <p class="hint">Código de tres direcciones (cada instrucción tiene como máximo un operador).</p>
+      <pre id="tac"></pre>
+    </div>
+    <div class="pane" id="p5">
+      <p class="hint">Resultado de ejecutar el programa (sentencias <code>mostrar</code>) y valores finales de las variables.</p>
+      <div class="out" id="outBox"></div>
+      <h2 style="margin-top:14px">Variables finales</h2>
+      <div class="out" id="varsBox"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+/* ============ 1. ANALIZADOR LÉXICO ============ */
+function lex(src){
+  const tokens=[], errors=[];
+  let i=0, line=1, col=1;
+  const adv=()=>{ if(src[i]==="\n"){line++;col=1;} else col++; i++; };
+  while(i<src.length){
+    const c=src[i];
+    if(/\s/.test(c)){ adv(); continue; }
+    if(c==="/" && src[i+1]==="/"){ while(i<src.length && src[i]!=="\n") adv(); continue; }
+    const sl=line, sc=col;
+    if(/[0-9]/.test(c)){
+      let s=""; while(i<src.length && /[0-9]/.test(src[i])){ s+=src[i]; adv(); }
+      if(src[i]==="." && /[0-9]/.test(src[i+1]||"")){ s+="."; adv(); while(i<src.length && /[0-9]/.test(src[i])){ s+=src[i]; adv(); } }
+      tokens.push({type:"NUM",lexeme:s,line:sl,col:sc}); continue;
+    }
+    if(/[A-Za-z_]/.test(c)){
+      let s=""; while(i<src.length && /[A-Za-z0-9_]/.test(src[i])){ s+=src[i]; adv(); }
+      tokens.push({type:s==="mostrar"?"MOSTRAR":"ID",lexeme:s,line:sl,col:sc}); continue;
+    }
+    const single={ "+":"SUMA","-":"RESTA","*":"MULT","/":"DIV","=":"ASIGNA","(":"LPAREN",")":"RPAREN",";":"PUNTOYCOMA" };
+    if(single[c]){ tokens.push({type:single[c],lexeme:c,line:sl,col:sc}); adv(); continue; }
+    errors.push(`Léxico (lín ${sl}, col ${sc}): carácter no válido «${c}»`); adv();
+  }
+  tokens.push({type:"EOF",lexeme:"",line,col});
+  return {tokens,errors};
+}
+
+/* ============ 2. ANALIZADOR SINTÁCTICO ============ */
+function parse(tokens){
+  let p=0; const errors=[]; const stmts=[];
+  const peek=()=>tokens[p], next=()=>tokens[p++];
+  const where=t=>`lín ${t.line}, col ${t.col}`;
+  function fail(msg){ const t=peek(); throw {msg:`Sintaxis (${where(t)}): ${msg}`}; }
+  function expect(type,what){ if(peek().type!==type) fail(`se esperaba ${what} pero llegó «${peek().lexeme||"fin de archivo"}»`); return next(); }
+
+  function expr(){
+    let l=term();
+    while(peek().type==="SUMA"||peek().type==="RESTA"){ const o=next(); const r=term(); l={k:"Bin",op:o.lexeme,l,r,line:o.line}; }
+    return l;
+  }
+  function term(){
+    let l=factor();
+    while(peek().type==="MULT"||peek().type==="DIV"){ const o=next(); const r=factor(); l={k:"Bin",op:o.lexeme,l,r,line:o.line}; }
+    return l;
+  }
+  function factor(){
+    const t=peek();
+    if(t.type==="NUM"){ next(); return {k:"Num",v:parseFloat(t.lexeme),line:t.line}; }
+    if(t.type==="ID"){ next(); return {k:"Var",name:t.lexeme,line:t.line}; }
+    if(t.type==="RESTA"){ next(); return {k:"Neg",e:factor(),line:t.line}; }
+    if(t.type==="LPAREN"){ next(); const e=expr(); expect("RPAREN","«)»"); return e; }
+    fail(`se esperaba un número, variable o «(» pero llegó «${t.lexeme||"fin de archivo"}»`);
+  }
+  function stmt(){
+    const t=peek();
+    if(t.type==="MOSTRAR"){ next(); const e=expr(); expect("PUNTOYCOMA","«;»"); return {k:"Mostrar",e,line:t.line}; }
+    if(t.type==="ID"){ next(); expect("ASIGNA","«=»"); const e=expr(); expect("PUNTOYCOMA","«;»"); return {k:"Asigna",name:t.lexeme,e,line:t.line}; }
+    fail(`sentencia inválida, se encontró «${t.lexeme}»`);
+  }
+  while(peek().type!=="EOF"){
+    try{ stmts.push(stmt()); }
+    catch(e){
+      if(!e.msg) throw e;
+      errors.push(e.msg);
+      // recuperación en modo pánico: saltar hasta el próximo «;»
+      while(peek().type!=="EOF" && peek().type!=="PUNTOYCOMA") p++;
+      if(peek().type==="PUNTOYCOMA") p++;
+    }
+  }
+  return {ast:{k:"Programa",body:stmts},errors};
+}
+
+/* ============ 3. ANÁLISIS SEMÁNTICO ============ */
+function semantic(ast){
+  const sym=new Map(), errors=[], warns=[];
+  function walk(e){
+    switch(e.k){
+      case "Num": break;
+      case "Var":
+        if(!sym.has(e.name)) errors.push(`Semántica (lín ${e.line}): la variable «${e.name}» se usa sin haber sido definida`);
+        else sym.get(e.name).uses++;
+        break;
+      case "Neg": walk(e.e); break;
+      case "Bin":
+        walk(e.l); walk(e.r);
+        if(e.op==="/" && e.r.k==="Num" && e.r.v===0) errors.push(`Semántica (lín ${e.line}): división entre cero`);
+        break;
+    }
+  }
+  for(const s of ast.body){
+    walk(s.e);
+    if(s.k==="Asigna" && !sym.has(s.name)) sym.set(s.name,{line:s.line,uses:0});
+  }
+  return {sym,errors};
+}
+
+/* ============ 4. CÓDIGO INTERMEDIO (3 direcciones) ============ */
+function codegen(ast){
+  const code=[]; let t=0;
+  const fmt=n=>String(n);
+  function gen(e){
+    switch(e.k){
+      case "Num": return fmt(e.v);
+      case "Var": return e.name;
+      case "Neg": { const a=gen(e.e); const r="t"+(++t); code.push(`${r} = -${a}`); return r; }
+      case "Bin": { const a=gen(e.l), b=gen(e.r); const r="t"+(++t); code.push(`${r} = ${a} ${e.op} ${b}`); return r; }
+    }
+  }
+  for(const s of ast.body){
+    const r=gen(s.e);
+    code.push(s.k==="Asigna" ? `${s.name} = ${r}` : `print ${r}`);
+  }
+  return code;
+}
+
+/* ============ 5. EJECUCIÓN ============ */
+function run(ast){
+  const env={}, out=[];
+  function ev(e){
+    switch(e.k){
+      case "Num": return e.v;
+      case "Var": return env[e.name];
+      case "Neg": return -ev(e.e);
+      case "Bin": { const a=ev(e.l), b=ev(e.r);
+        return e.op==="+"?a+b : e.op==="-"?a-b : e.op==="*"?a*b : a/b; }
+    }
+  }
+  const round=n=>Number.isInteger(n)?String(n):String(Math.round(n*1e6)/1e6);
+  for(const s of ast.body){
+    const v=ev(s.e);
+    if(s.k==="Asigna") env[s.name]=v; else out.push(round(v));
+  }
+  return {env,out,round};
+}
+
+/* ============ UI ============ */
+const $=id=>document.getElementById(id);
+function el(tag,cls,text){ const e=document.createElement(tag); if(cls) e.className=cls; if(text!==undefined) e.textContent=text; return e; }
+
+function astNode(n){
+  const li=el("li");
+  const label=(k,extra)=>{ li.append(el("span","n",k)); if(extra!==undefined) li.append(" ",el("span","l",extra)); };
+  const kids=[];
+  switch(n.k){
+    case "Programa": label("Programa"); kids.push(...n.body); break;
+    case "Asigna": label("Asignación",n.name); kids.push(n.e); break;
+    case "Mostrar": label("Mostrar"); kids.push(n.e); break;
+    case "Bin": label("Binaria",n.op); kids.push(n.l,n.r); break;
+    case "Neg": label("Negativo"); kids.push(n.e); break;
+    case "Num": label("Número",n.v); break;
+    case "Var": label("Variable",n.name); break;
+  }
+  if(kids.length){ const ul=el("ul"); kids.forEach(k=>ul.append(astNode(k))); li.append(ul); }
+  return li;
+}
+
+function showStatus(ok,errors){
+  const s=$("status"); s.innerHTML="";
+  const d=el("div","status "+(ok?"ok":"err"));
+  if(ok){ d.textContent="✓ Compilación exitosa: sin errores léxicos, sintácticos ni semánticos."; }
+  else {
+    d.append(el("b","",`✗ ${errors.length} error(es) encontrado(s):`));
+    const ul=el("ul"); errors.forEach(e=>ul.append(el("li","",e))); d.append(ul);
+  }
+  s.append(d);
+}
+
+function compile(){
+  const src=$("src").value;
+  const L=lex(src);
+  // Léxico
+  const tb=$("tokBody"); tb.innerHTML="";
+  L.tokens.forEach((t,i)=>{
+    const tr=el("tr");
+    tr.append(el("td","",i+1), el("td","m",t.lexeme||"∅"));
+    const td=el("td"); td.append(el("span","tag",t.type)); tr.append(td, el("td","",t.line), el("td","",t.col));
+    tb.append(tr);
+  });
+  // Sintaxis
+  const P=parse(L.tokens);
+  const root=$("astRoot"); root.innerHTML=""; root.append(astNode(P.ast));
+  // Semántica
+  const S=semantic(P.ast);
+  const sb=$("symBody"); sb.innerHTML="";
+  if(!S.sym.size){ const tr=el("tr"); const td=el("td","","Sin variables definidas"); td.colSpan=3; tr.append(td); sb.append(tr); }
+  S.sym.forEach((v,k)=>{ const tr=el("tr"); tr.append(el("td","m",k), el("td","",v.line), el("td","",v.uses)); sb.append(tr); });
+  const sm=$("semMsgs"); sm.innerHTML="";
+  S.errors.forEach(e=>sm.append(el("div","status err",e)));
+  // Resultados
+  const all=[...L.errors,...P.errors,...S.errors];
+  showStatus(all.length===0,all);
+  const tac=$("tac"), ob=$("outBox"), vb=$("varsBox");
+  ob.innerHTML=""; vb.innerHTML="";
+  if(all.length){
+    tac.textContent="— No se genera código: corrige los errores primero —";
+    ob.append(el("div","","— No se ejecuta: hay errores de compilación —"));
+    vb.append(el("div","","—"));
+    return;
+  }
+  tac.textContent=codegen(P.ast).map((l,i)=>String(i+1).padStart(2," ")+"  "+l).join("\n");
+  const R=run(P.ast);
+  R.out.forEach(v=>ob.append(el("div","","▸ "+v)));
+  if(!R.out.length) ob.append(el("div","","(el programa no imprime nada)"));
+  Object.entries(R.env).forEach(([k,v])=>vb.append(el("div","",`${k} = ${R.round(v)}`)));
+}
+
+document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>{
+  document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("active",x===b));
+  document.querySelectorAll(".pane").forEach(x=>x.classList.toggle("active",x.id===b.dataset.p));
+}));
+const EX_OK=$("src").value;
+const EX_ERR=`// Este programa tiene errores a propósito
+a = 10;
+b = a * ;
+c = a + z;
+d = 5 / 0;
+e = 3 $ 4;
+mostrar a + b;`;
+$("btnRun").addEventListener("click",compile);
+$("btnEx1").addEventListener("click",()=>{ $("src").value=EX_ERR; compile(); });
+$("btnEx2").addEventListener("click",()=>{ $("src").value=EX_OK; compile(); });
+$("btnClear").addEventListener("click",()=>{ $("src").value=""; compile(); });
+$("src").addEventListener("keydown",e=>{ if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){ e.preventDefault(); compile(); }});
+compile();
+</script>
+</body>
+</html>
